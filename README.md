@@ -1,9 +1,15 @@
 # Craniosynostosis Distance Maps (CD-Map)
 
+![](/assets/schematic_c.png)
+
+Images taken from the [paper](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=10129889)
+
 ## Overview
 
 This is a Python toolbox to create distance maps, e.g. for a CNN-based 
 classification of head deformities. 
+
+![](/assets/graphical_abstract.png)
 
 We recommend using a virtual environment to manage package dependencies. This
 repository can be combined with the instances of the statistical shape model
@@ -67,7 +73,4 @@ statistical shape model and should be enough to get you going.
 All source code is subject to the terms of the General Public License 3.0.
 
 ## References
-If you use our code, please cite the corresponding paper:
-
-
-For a specific release, please also cite the Zenodo release as well:
+If you use our code, please cite the corresponding paper: (https://ieeexplore.ieee.org/document/10129889) [pdf](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=10129889)
