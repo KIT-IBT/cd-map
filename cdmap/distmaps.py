@@ -23,21 +23,21 @@ class MeshLoader():
         self.polydata = MeshLoader.load_ply(path_to_file)
         if datatype == "subject":
             self.all_landmarks = MeshLoader.load_landmarks(path_to_lms)
-            self.center_def_lms = self.all_landmarks[lms_center_ids]
+            self.center_defining_landmarks = self.all_landmarks[lms_center_ids]
         elif datatype == "instance":
             lm_ids = MeshLoader.define_shape_model_landmarks()
             vtk_points = vtk.util.numpy_support.vtk_to_numpy(
                     self.polydata.GetPoints().GetData())
             self.all_landmarks = vtk_points[lm_ids]
             defined_landmarks = [8,9,5]
-            self.center_def_lms = self.all_landmarks[defined_landmarks]
+            self.center_defining_landmarks = self.all_landmarks[defined_landmarks]
         else:
             raise TypeError("Incorrect datatype specified, was " + str(datatype))
     def __call__(self):
         """
         Returns polydata and the three important landmarks to define the coordinate system.
         """
-        return self.polydata, self.center_def_lms
+        return self.polydata, self.center_defining_landmarks
 
     def get_points_and_cells(self):
         """
@@ -93,13 +93,13 @@ class MeshIntersector():
     """
     def __init__(self,
             polydata,
-            center_def_lms):
+            center_defining_landmarks):
         """
         Requires polydata and center defining landmarks.
         """
         self.polydata = polydata
         self.obb_tree = None
-        self.center_def_lms = center_def_lms
+        self.center_defining_landmarks = center_defining_landmarks
         # If landmarks are not specified, assuming shape model data
 
     @staticmethod
@@ -225,7 +225,7 @@ class MeshIntersector():
         ----
         Returns a numpy array of size 3.
         """
-        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.center_def_lms)
+        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.center_defining_landmarks)
         up_vec_rotated = R @ up_vector
         intersection_vector = [[tuple(pt_center),tuple(up_vec_rotated)]]
         pt_tip = MeshIntersector.intersect_mesh(self,intersection_vector)
@@ -356,7 +356,8 @@ class RayCreator():
         """
         Creates and returns tuple list from self.x_arr and self.y_arr.
         """
-        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_def_lms)
+        pt_center,R = MeshIntersector.define_axes_from_landmarks(
+                self.intersector.center_defining_landmarks)
         tuple_list = RayCreator.map_transform_spherical(self.x_arr,
                                                         self.y_arr,
                                                         pt_center,
@@ -368,7 +369,8 @@ class RayCreator():
         """
         Creates and returns tuple list from self.x_arr and self.y_arr.
         """
-        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_def_lms)
+        pt_center,R = MeshIntersector.define_axes_from_landmarks(
+                self.intersector.center_defining_landmarks)
         tuple_list = RayCreator.map_transform_left_right_spherical(self.x_arr,
                                                                    self.y_arr,
                                                                    pt_center,
@@ -381,7 +383,8 @@ class RayCreator():
         Creates and returns tuple list from self.x_arr and self.y_arr.
         Cuts off 25% of the lower ear part which is roughly the image without ears.
         """
-        center_old,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_def_lms)
+        center_old,R = MeshIntersector.define_axes_from_landmarks(
+                self.intersector.center_defining_landmarks)
         pt_tip = self.intersector.define_tip()
         # Move new center point a little bit to the top, maybe 25%?
         pt_center_new = center_old + (pt_tip - center_old) * 0.25
@@ -397,7 +400,8 @@ class RayCreator():
         Creates and returns tuple list from self.x_arr, self.y_arr and the tip point.
         """
         tuple_list = [[(None,None,None),(None,None,None)]] * len(self.x_arr) * len(self.y_arr)
-        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_def_lms)
+        pt_center,R = MeshIntersector.define_axes_from_landmarks(
+                self.intersector.center_defining_landmarks)
         pt_tip = self.intersector.define_tip()
         tuple_list = RayCreator.map_transform_cylindrical(self.x_arr,
                                                           self.y_arr,
@@ -435,7 +439,8 @@ class RayCreator():
         """
         Creates and returns tuple list from direction vectors, transformed using the landmarks.
         """
-        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_def_lms)
+        pt_center,R = MeshIntersector.define_axes_from_landmarks(
+                self.intersector.center_defining_landmarks)
         tuple_list = [[(None,None,None),(None,None,None)]] * len(target_points)
         for point,i in zip(target_points,range(len(target_points))):
             dir_vec = R @ point
