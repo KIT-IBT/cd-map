@@ -149,20 +149,19 @@ class MeshIntersector():
         Returns a list of list of tuples as an output (a list of directions,
         for each direction a list of intersection points as a 3D tuple).
         """
-        assert type(tuple_list) == list, ("Expecting a list (of tuples), type is " +
+        assert isinstance(tuple_list,list), ("Expecting a list (of tuples), type is " +
                                           str(type(tuple_list)))
         # Check if we have a tree, and if not, then create one on the fly
         if self.obb_tree is None:
             self.obb_tree = self.create_tree(self.polydata)
         full_point_list = []
         for cur_tuple in tuple_list:
-            assert type(cur_tuple) == list and len(cur_tuple) == 2, ("Bad check " +
+            assert isinstance(cur_tuple,list) and len(cur_tuple) == 2, ("Bad check " +
                     "in the beginning, expected a list of lists "
                     "containing two 3-tuples, got " + str(type(cur_tuple)) +
                     " " + str(len(cur_tuple)))
             pt_center = cur_tuple[0]
             pt_target = cur_tuple[1]
-            # print("Center, target",pt_center,pt_target)
             intersection_array = vtk.vtkPoints()
             self.obb_tree.IntersectWithLine(pt_center, pt_target, intersection_array, None)
             pts_vtk_intersec_data = intersection_array.GetData()
@@ -183,11 +182,11 @@ class MeshIntersector():
         ----
         Returns a tuple list of distances.
         """
-        assert type(tuple_hit_list) == list, ("Expected inner list of hit points, got " +
+        assert isinstance(tuple_hit_list,list), ("Expected inner list of hit points, got " +
                                               str(type(tuple_hit_list)))
-        assert type(tuple_start) == tuple, "Expected start tuple, got " + str(type(tuple_start))
+        assert isinstance(tuple_start,tuple), "Expected start tuple, got " + str(type(tuple_start))
         for cur_tuple in tuple_hit_list:
-            assert type(cur_tuple) == tuple , ("Expected type tuple of hit points, got " +
+            assert isinstance(cur_tuple,tuple) , ("Expected type tuple of hit points, got " +
                                                str(type(cur_tuple)))
             assert len(cur_tuple) == 3, ("Expected tulples of lengths 3 of hit points, got " +
                                          str(len(cur_tuple)))
@@ -209,9 +208,9 @@ class MeshIntersector():
         ----
         Returns a tuple list of target points.
         """
-        assert type(list_of_tuple_list) == list, ("Expected outer list, got " +
+        assert isinstance(list_of_tuple_list,list), ("Expected outer list, got " +
                                                   str(type(list_of_tuple_list)))
-        assert type(tuples_list_rays) == list, ("Expected tuples start list, got "
+        assert isinstance(tuples_list_rays,list), ("Expected tuples start list, got "
                                                 + str(type(list_of_tuple_list)))
         # tuples list rays contains the point at position 0 and the end point at position 1
         reduced_list = [MeshIntersector.reduce_list_to_min_dist_tuple(
@@ -231,7 +230,7 @@ class MeshIntersector():
         intersection_vector = [[tuple(pt_center),tuple(up_vec_rotated)]]
         pt_tip = MeshIntersector.intersect_mesh(self,intersection_vector)
         pt_tip = pt_tip[0]
-        if type(pt_tip) == list and len(pt_tip) > 1:
+        if isinstance(pt_tip,list) and len(pt_tip) > 1:
             warnings.warn("Got more than one intersection, taking the smaller one", UserWarning)
             pt_tip = MeshIntersector.reduce_list_to_min_dist_tuple(pt_tip,pt_center)
         return numpy.array(pt_tip[0])
@@ -441,7 +440,6 @@ class RayCreator():
         for point,i in zip(target_points,range(len(target_points))):
             dir_vec = R @ point
             pt_end = pt_center + self.ray_length_mm * dir_vec
-            # print(pt_end)
             tuple_list[i] = [tuple(pt_center),tuple(pt_end)]
         return tuple_list
 
@@ -536,7 +534,6 @@ class RayCreator():
         for i,point,tuple_in in zip(range(len(point_list)),point_list,tuples_in):
             if point != []:
                 dists[i] = numpy.linalg.norm(numpy.array(point) - numpy.array(tuple_in[0]))
-        # print(dists)
         if num_dimensions==2:
             dists = dists.reshape(len(self.x_arr),len(self.y_arr))
         return dists.astype(float)
@@ -581,7 +578,6 @@ class AttributionTransformer():
                                                                                 pt_center,
                                                                                 R,
                                                                                 pt_tip=pt_tip)
-        # print("Mean:", numpy.mean(points_transformed,axis=0))
         color_vals = AttributionTransformer.color_values_from_transformed_points(self.method,
                                                                                  points_transformed,
                                                                                  image)
@@ -634,7 +630,7 @@ class AttributionTransformer():
         """
         dists = [numpy.linalg.norm(point,2) for point in pts]
         new_frame_coords = dists
-        for i in range(len(new_frame_coords)):
+        for i,_ in enumerate(new_frame_coords):
             r = dists[i]
             point = pts[i]
             theta = numpy.arcsin(point[2]/r)
@@ -657,7 +653,7 @@ class AttributionTransformer():
         # Assumes already centered points
         dists = [numpy.linalg.norm(point,2) for point in pts]
         new_frame_coords = dists
-        for i in range(len(new_frame_coords)):
+        for i,_ in enumerate(new_frame_coords):
             r = dists[i]
             point = pts[i]
             # Original
@@ -681,13 +677,12 @@ class AttributionTransformer():
         # Assumes already centered points
         new_frame_coords = [[0,0,0] for point in pts]
         rhos = [numpy.linalg.norm(point[:2]) for point in pts]
-        for i in range(len(pts)):
+        for i,_ in enumerate(pts):
             point = pts[i]
             z = pts[i][2]
             rho = rhos[i]
             phi = numpy.arctan2(point[1],point[0])
             if phi < 0:
-                # print("correct")
                 phi = phi + 2* numpy.pi
             eucl = [phi, rho, z]
             new_frame_coords[i] = eucl
@@ -712,12 +707,9 @@ class AttributionTransformer():
             pts_diff = points - pt_center
             # tip_scaling = pt_tip - pt_center
             pt_tip_scaled = [numpy.transpose(R) @ (pt_tip - pt_center)]
-            # print(pt_tip_scaled)
             length_tip = numpy.linalg.norm(pt_tip_scaled,2)
-            # print(length_tip)
             # Make list of points
             pts_rot = [numpy.transpose(R) @ point for point in pts_diff]
-            # print(pts_rot)
             pts_rot = [point / [1,1,length_tip] for point in pts_rot]
             pts_fin = AttributionTransformer.euclidean_to_dm_cylinder(pts_rot)
         return pts_fin
