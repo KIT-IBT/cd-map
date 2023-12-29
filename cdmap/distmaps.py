@@ -1,40 +1,43 @@
-import vtk
-import numpy
+"""
+This module creates the craniosynostosis distance maps.
+"""
 import warnings
+import numpy
+import vtk
 import vtk.util.numpy_support
 
 class MeshLoader():
     """
-    Loads a mesh from the 496-dataset (currently, only ply is supported). If a text file is provided,
-    it expects the 10 landmarks, otherwise it assumes dense correspondence and uses
-    the shape model based landmarks.
+    Loads a mesh from the 496-dataset (currently, only ply is supported). If a
+    text file is provided, it expects the 10 landmarks, otherwise it assumes
+    dense correspondence and uses the shape model based landmarks.
     """
     def __init__(self,
             path_to_file,
             path_to_lms=None,
             datatype=None,
-            center_defining_landmark_ids = [8,9,5]):
+            lms_center_ids = None):
         assert datatype is not None, "No datatype specified"
+        if lms_center_ids is None:
+            lms_center_ids = [8,9,5]
         self.polydata = MeshLoader.load_ply(path_to_file)
         if datatype == "subject":
             self.all_landmarks = MeshLoader.load_landmarks(path_to_lms)
-            self.center_defining_landmarks = self.all_landmarks[center_defining_landmark_ids]
-            # print(self.center_defining_landmarks)
+            self.center_def_lms = self.all_landmarks[lms_center_ids]
         elif datatype == "instance":
             lm_ids = MeshLoader.define_shape_model_landmarks()
-            vtk_points = vtk.util.numpy_support.vtk_to_numpy(self.polydata.GetPoints().GetData())
+            vtk_points = vtk.util.numpy_support.vtk_to_numpy(
+                    self.polydata.GetPoints().GetData())
             self.all_landmarks = vtk_points[lm_ids]
-            # print(self.all_landmarks)
             defined_landmarks = [8,9,5]
-            self.center_defining_landmarks = self.all_landmarks[defined_landmarks]
-            # print(self.center_defining_landmarks)
+            self.center_def_lms = self.all_landmarks[defined_landmarks]
         else:
-            raise Exception("Incorrect datatype specified, was " + str(datatype))
+            raise TypeError("Incorrect datatype specified, was " + str(datatype))
     def __call__(self):
         """
         Returns polydata and the three important landmarks to define the coordinate system.
         """
-        return self.polydata, self.center_defining_landmarks
+        return self.polydata, self.center_def_lms
 
     def get_points_and_cells(self):
         """
@@ -57,24 +60,12 @@ class MeshLoader():
         # If there are no points in 'vtk_poly_data' something went wrong
         if polydata.GetNumberOfPoints() == 0:
             raise ValueError("No point data could be loaded from '" + path_to_ply)
-        else:
-            return polydata
-
-    # @staticmethod
-    # def loadH5(path_to_h5):
-    #     """
-    #     Loads h5 dataset, but was never tested
-    #     """
-    #     cur_h5 = h5py.File(path_to_h5,'r')
-    #     if len(list(cur_h5)) == 0:
-    #         raise ValueError("No point data could be loaded from '" + path_to_h5)
-    #     else:
-    #         return cur_h5
+        return polydata
 
     @staticmethod
     def define_shape_model_landmarks():
         """
-        Defines the 10 landmarks on the shape model data, 
+        Defines the 10 landmarks on the shape model data,
         as defined on our publicly available statistical shape model.
         Indices start at zero.
         https://zenodo.org/record/5638148
@@ -95,20 +86,20 @@ class MeshIntersector():
     """
     Uses vtk polydata and the landmarks to create the center point and axes.
     When called, expects a list of a list of tuples (a list of rays with two
-    elements each also in a list). 
-    Each of the two ray element is start and end point. 
+    elements each also in a list).
+    Each of the two ray element is start and end point.
     Example of rays in coordinate axes from origin:
     [[(0,0,0),(1,0,0)],[(0,0,0),(0,1,0)],[(0,0,0),(0,0,1)]]
     """
     def __init__(self,
             polydata,
-            center_defining_landmarks):
+            center_def_lms):
         """
         Requires polydata and center defining landmarks.
         """
         self.polydata = polydata
         self.obb_tree = None
-        self.center_defining_landmarks = center_defining_landmarks
+        self.center_def_lms = center_def_lms
         # If landmarks are not specified, assuming shape model data
 
     @staticmethod
@@ -116,14 +107,15 @@ class MeshIntersector():
         """
         Normalizes vector to length one in Euclidean space.
         """
-        sanitized_vec = numpy.array([x for x in input_vec if not(str(x) == 'nan')])
-        output_vec = sanitized_vec / numpy.sqrt(sum(sanitized_vec ** 2,0));
+        sanitized_vec = numpy.array([x for x in input_vec if str(x) != 'nan'])
+        output_vec = sanitized_vec / numpy.sqrt(
+                sum(sanitized_vec ** 2,0))
         return output_vec
 
     @staticmethod
     def define_axes_from_landmarks(landmarks):
         """
-        Defines the three axes and the corresponding rotation matrix 
+        Defines the three axes and the corresponding rotation matrix
         from the three landmarks.
         """
         pt_center = numpy.mean(landmarks[0:2],0)
@@ -149,32 +141,36 @@ class MeshIntersector():
     def intersect_mesh(self,tuple_list):
         """
         Expects a list of a list of tuples (a list of rays with two
-        elements each also in a list) for ray intersection with the polydata in self. 
-        Each of the two ray element is start and end point. 
+        elements each also in a list) for ray intersection with the polydata in self.
+        Each of the two ray element is start and end point.
         Example of rays in coordinate axes from origin:
         [[(0,0,0),(1,0,0)],[(0,0,0),(0,1,0)],[(0,0,0),(0,0,1)]]
         ----
-        Returns a list of list of tuples as an output (a list of directions, 
+        Returns a list of list of tuples as an output (a list of directions,
         for each direction a list of intersection points as a 3D tuple).
         """
-        assert type(tuple_list) == list, "Expecting a list (of tuples), type is " + str(type(tuple_list))
+        assert type(tuple_list) == list, ("Expecting a list (of tuples), type is " +
+                                          str(type(tuple_list)))
         # Check if we have a tree, and if not, then create one on the fly
-        if self.obb_tree == None:
+        if self.obb_tree is None:
             self.obb_tree = self.create_tree(self.polydata)
         full_point_list = []
         for cur_tuple in tuple_list:
-            assert type(cur_tuple) == list and len(cur_tuple) == 2, "Bad check in the beginning, expected a list of lists containing two 3-tuples, got " + str(type(cur_tuple)) + " " + str(len(cur_tuple))
+            assert type(cur_tuple) == list and len(cur_tuple) == 2, ("Bad check " +
+                    "in the beginning, expected a list of lists "
+                    "containing two 3-tuples, got " + str(type(cur_tuple)) +
+                    " " + str(len(cur_tuple)))
             pt_center = cur_tuple[0]
             pt_target = cur_tuple[1]
             # print("Center, target",pt_center,pt_target)
             intersection_array = vtk.vtkPoints()
             self.obb_tree.IntersectWithLine(pt_center, pt_target, intersection_array, None)
-            pointsVTKIntersectionData = intersection_array.GetData()
-            numPointsVTKIntersection = pointsVTKIntersectionData.GetNumberOfTuples()
+            pts_vtk_intersec_data = intersection_array.GetData()
+            num_pts_vtk_intersec = pts_vtk_intersec_data.GetNumberOfTuples()
             single_point_list = []
-            if numPointsVTKIntersection > 0:
-                for idx in range(numPointsVTKIntersection):
-                    _tup = pointsVTKIntersectionData.GetTuple3(idx)
+            if num_pts_vtk_intersec > 0:
+                for idx in range(num_pts_vtk_intersec):
+                    _tup = pts_vtk_intersec_data.GetTuple3(idx)
                     single_point_list.append(_tup)
             full_point_list.append(single_point_list)
         return full_point_list
@@ -182,27 +178,29 @@ class MeshIntersector():
     @staticmethod
     def reduce_list_to_min_dist_tuple(tuple_hit_list,tuple_start):
         """
-        Expects a list of tuples (a list of lenths as 3D tuples) 
+        Expects a list of tuples (a list of lenths as 3D tuples)
         and reduces it to the one with the smallest distance.
         ----
         Returns a tuple list of distances.
         """
-        assert type(tuple_hit_list) == list, "Expected inner list of hit points, got " + str(type(tuple_hit_list))
+        assert type(tuple_hit_list) == list, ("Expected inner list of hit points, got " +
+                                              str(type(tuple_hit_list)))
         assert type(tuple_start) == tuple, "Expected start tuple, got " + str(type(tuple_start))
         for cur_tuple in tuple_hit_list:
-            assert type(cur_tuple) == tuple , "Expected type tuple of hit points, got " + str(type(cur_tuple))
-            assert len(cur_tuple) == 3, "Expected tulples of lengths 3 of hit points, got " + str(len(cur_tuple))
+            assert type(cur_tuple) == tuple , ("Expected type tuple of hit points, got " +
+                                               str(type(cur_tuple)))
+            assert len(cur_tuple) == 3, ("Expected tulples of lengths 3 of hit points, got " +
+                                         str(len(cur_tuple)))
         # If only one element, nothing to do
         if len(tuple_hit_list) == 0:
             return []
-        elif len(tuple_hit_list) == 1:
+        if len(tuple_hit_list) == 1:
             return tuple_hit_list
-        else:
-            dist_list = []
-            for ele in tuple_hit_list:
-                dist_list.append(numpy.linalg.norm(numpy.array(ele) - numpy.array(tuple_start)))
-            min_index = numpy.argmin(dist_list)
-            return [tuple_hit_list[min_index]]
+        dist_list = []
+        for ele in tuple_hit_list:
+            dist_list.append(numpy.linalg.norm(numpy.array(ele) - numpy.array(tuple_start)))
+        min_index = numpy.argmin(dist_list)
+        return [tuple_hit_list[min_index]]
 
     @staticmethod
     def reduce_distance_list(list_of_tuple_list,tuples_list_rays):
@@ -211,10 +209,14 @@ class MeshIntersector():
         ----
         Returns a tuple list of target points.
         """
-        assert type(list_of_tuple_list) == list, "Expected outer list, got " + str(type(list_of_tuple_list))
-        assert type(tuples_list_rays) == list, "Expected tuples start list, got " + str(type(list_of_tuple_list))
+        assert type(list_of_tuple_list) == list, ("Expected outer list, got " +
+                                                  str(type(list_of_tuple_list)))
+        assert type(tuples_list_rays) == list, ("Expected tuples start list, got "
+                                                + str(type(list_of_tuple_list)))
         # tuples list rays contains the point at position 0 and the end point at position 1
-        reduced_list = [MeshIntersector.reduce_list_to_min_dist_tuple(cur_list,start_point[0]) for cur_list,start_point in zip(list_of_tuple_list,tuples_list_rays)]
+        reduced_list = [MeshIntersector.reduce_list_to_min_dist_tuple(
+            cur_list,start_point[0]) for cur_list,start_point in zip(
+                list_of_tuple_list,tuples_list_rays)]
         return reduced_list
 
     def define_tip(self,up_vector=numpy.array([0,0,500])):
@@ -224,7 +226,7 @@ class MeshIntersector():
         ----
         Returns a numpy array of size 3.
         """
-        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.center_defining_landmarks)
+        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.center_def_lms)
         up_vec_rotated = R @ up_vector
         intersection_vector = [[tuple(pt_center),tuple(up_vec_rotated)]]
         pt_tip = MeshIntersector.intersect_mesh(self,intersection_vector)
@@ -246,9 +248,9 @@ class MeshIntersector():
 
 class RayCreator():
     """
-    Provides rays for different mapping types. Currently supported: Spherical (halfsphere), 
-    Arch-spherical (leftright_halfsphere), and Cylindrical (cylinder). 
-    Requires RayIntersector to compute the rays. For quadratical maps, use num_rays, for 
+    Provides rays for different mapping types. Currently supported: Spherical (halfsphere),
+    Arch-spherical (leftright_halfsphere), and Cylindrical (cylinder).
+    Requires RayIntersector to compute the rays. For quadratical maps, use num_rays, for
     non-quadratical use x_arr and y_arr to overwrite.
     """
     def __init__(self,
@@ -264,6 +266,9 @@ class RayCreator():
         self.x_arr,self.y_arr = self.initialize_arrays(method,num_rays_x,num_rays_y)
 
     def initialize_arrays(self,method,num_rays_x,num_rays_y):
+        """
+        Initialize the image arrays from the number of rays requested and the method chosen.
+        """
         assert method is not None, "Method missing, valid are: 'half_sphere' and 'cylinder'"
         if method == "halfsphere":
             x_arr,y_arr = RayCreator.get_half_sphere_array(num_rays_x,num_rays_y)
@@ -278,7 +283,7 @@ class RayCreator():
         elif method == "noears_halfsphere":
             x_arr,y_arr = RayCreator.get_half_sphere_array(num_rays_x,num_rays_y)
         else:
-            raise Exception("method type incorrect, given ", method)
+            raise TypeError("method type incorrect, given ", method)
         return x_arr,y_arr
 
     # Half sphere array: x = rotation angle phi and y = rotation array theta
@@ -352,28 +357,40 @@ class RayCreator():
         """
         Creates and returns tuple list from self.x_arr and self.y_arr.
         """
-        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_defining_landmarks)
-        tuple_list = RayCreator.map_transform_spherical(self.x_arr,self.y_arr,pt_center,self.ray_length_mm,R)
+        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_def_lms)
+        tuple_list = RayCreator.map_transform_spherical(self.x_arr,
+                                                        self.y_arr,
+                                                        pt_center,
+                                                        self.ray_length_mm,
+                                                        R)
         return tuple_list
 
     def create_tuples_from_left_right_half_sphere(self):
         """
         Creates and returns tuple list from self.x_arr and self.y_arr.
         """
-        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_defining_landmarks)
-        tuple_list = RayCreator.map_transform_left_right_spherical(self.x_arr,self.y_arr,pt_center,self.ray_length_mm,R)
+        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_def_lms)
+        tuple_list = RayCreator.map_transform_left_right_spherical(self.x_arr,
+                                                                   self.y_arr,
+                                                                   pt_center,
+                                                                   self.ray_length_mm,
+                                                                   R)
         return tuple_list
 
     def create_no_ears_tuples_from_half_sphere(self):
         """
-        Creates and returns tuple list from self.x_arr and self.y_arr. 
+        Creates and returns tuple list from self.x_arr and self.y_arr.
         Cuts off 25% of the lower ear part which is roughly the image without ears.
         """
-        pt_center_old,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_defining_landmarks)
+        center_old,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_def_lms)
         pt_tip = self.intersector.define_tip()
         # Move new center point a little bit to the top, maybe 25%?
-        pt_center_new = pt_center_old + (pt_tip - pt_center_old) * 0.25
-        tuple_list = RayCreator.map_transform_spherical(self.x_arr,self.y_arr,pt_center_new,self.ray_length_mm,R)
+        pt_center_new = center_old + (pt_tip - center_old) * 0.25
+        tuple_list = RayCreator.map_transform_spherical(self.x_arr,
+                                                        self.y_arr,
+                                                        pt_center_new,
+                                                        self.ray_length_mm,
+                                                        R)
         return tuple_list
 
     def create_tuples_from_cylinder(self):
@@ -381,16 +398,21 @@ class RayCreator():
         Creates and returns tuple list from self.x_arr, self.y_arr and the tip point.
         """
         tuple_list = [[(None,None,None),(None,None,None)]] * len(self.x_arr) * len(self.y_arr)
-        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_defining_landmarks)
+        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_def_lms)
         pt_tip = self.intersector.define_tip()
-        tuple_list = RayCreator.map_transform_cylindrical(self.x_arr,self.y_arr,pt_center,pt_tip,self.ray_length_mm,R)
+        tuple_list = RayCreator.map_transform_cylindrical(self.x_arr,
+                                                          self.y_arr,
+                                                          pt_center,
+                                                          pt_tip,
+                                                          self.ray_length_mm,
+                                                          R)
         return tuple_list
 
     def create_tuples(self):
         """
-        Wrapper for the different tuple creation functions. Currently supports 
-        spherical, arch-spherical, cylindrical, the spherical with the arcsin variant, 
-        which provides a more regular spacing but leaves out a large portion at 
+        Wrapper for the different tuple creation functions. Currently supports
+        spherical, arch-spherical, cylindrical, the spherical with the arcsin variant,
+        which provides a more regular spacing but leaves out a large portion at
         the tip of the head.
         """
         assert self.method is not None, "Method missing, valid are: 'halfsphere' and 'cylinder'"
@@ -407,14 +429,14 @@ class RayCreator():
         elif self.method == "noears_halfsphere":
             tuples_in = self.create_no_ears_tuples_from_half_sphere()
         else:
-            raise Exception("Incorrect method provided, is " + str(self.method))
+            raise ValueError("Incorrect method provided, is " + str(self.method))
         return tuples_in
 
     def create_tuples_from_direction_vectors(self,target_points):
         """
         Creates and returns tuple list from direction vectors, transformed using the landmarks.
         """
-        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_defining_landmarks)
+        pt_center,R = MeshIntersector.define_axes_from_landmarks(self.intersector.center_def_lms)
         tuple_list = [[(None,None,None),(None,None,None)]] * len(target_points)
         for point,i in zip(target_points,range(len(target_points))):
             dir_vec = R @ point
@@ -432,46 +454,71 @@ class RayCreator():
         return tuple_list
 
     @staticmethod
-    def map_transform_left_right_spherical(x_arr,y_arr,pt_center=[0,0,0],ray_length_mm=1,R=numpy.eye(3)):
+    def map_transform_left_right_spherical(x_arr,
+                                           y_arr,
+                                           pt_center=None,
+                                           ray_length_mm=1,
+                                           R=numpy.eye(3)):
         """
         Creates and returns tuple list from x and y array using the arch-spherical method.
         """
+        if pt_center is None:
+            pt_center = [0,0,0]
         tuple_list = [[(None,None,None),(None,None,None)]] * len(x_arr) * len(y_arr)
-        for x,xi in zip(x_arr,range(len(x_arr))):
-            for y,yi in zip(y_arr,range(len(y_arr))):
-                dir_vec_sph = numpy.array([numpy.sin(x) * numpy.cos(y), numpy.cos(x), numpy.sin(x) * numpy.sin(y)])
+        for x,x_i in zip(x_arr,range(len(x_arr))):
+            for y,y_i in zip(y_arr,range(len(y_arr))):
+                dir_vec_sph = numpy.array([numpy.sin(x) * numpy.cos(y),
+                                           numpy.cos(x),
+                                           numpy.sin(x) * numpy.sin(y)])
                 dir_vec = R @ dir_vec_sph
                 pt_end = pt_center + ray_length_mm * dir_vec
-                tuple_list[yi*len(y_arr) + xi] = [tuple(pt_center),tuple(pt_end)]
+                tuple_list[y_i*len(y_arr) + x_i] = [tuple(pt_center),tuple(pt_end)]
         return tuple_list
 
     @staticmethod
-    def map_transform_spherical(x_arr,y_arr,pt_center=[0,0,0],ray_length_mm=1,R=numpy.eye(3)):
+    def map_transform_spherical(x_arr,
+                                y_arr,
+                                pt_center=None,
+                                ray_length_mm=1,
+                                R=numpy.eye(3)):
         """
         Creates and returns tuple list from x and y array using the spherical method.
         """
+        if pt_center is None:
+            pt_center = [0,0,0]
         tuple_list = [[(None,None,None),(None,None,None)]] * len(x_arr) * len(y_arr)
-        for x,xi in zip(x_arr,range(len(x_arr))):
-            for y,yi in zip(y_arr,range(len(y_arr))):
-                dir_vec_sph = numpy.array([numpy.cos(x) * numpy.cos(y), numpy.sin(x) * numpy.cos(y), numpy.sin(y)])
+        for x,x_i in zip(x_arr,range(len(x_arr))):
+            for y,y_i in zip(y_arr,range(len(y_arr))):
+                dir_vec_sph = numpy.array([numpy.cos(x) * numpy.cos(y),
+                                           numpy.sin(x) * numpy.cos(y),
+                                           numpy.sin(y)])
                 dir_vec = R @ dir_vec_sph
                 pt_end = pt_center + ray_length_mm * dir_vec
-                tuple_list[yi*len(y_arr) + xi] = [tuple(pt_center),tuple(pt_end)]
+                tuple_list[y_i*len(y_arr) + x_i] = [tuple(pt_center),tuple(pt_end)]
         return tuple_list
 
     @staticmethod
-    def map_transform_cylindrical(x_arr,y_arr,pt_center=[0,0,0],pt_tip=[0,0,1],ray_length_mm=1,R=numpy.eye(3)):
+    def map_transform_cylindrical(x_arr,
+                                  y_arr,
+                                  pt_center=None,
+                                  pt_tip=None,
+                                  ray_length_mm=1,
+                                  R=numpy.eye(3)):
         """
         Creates and returns tuple list from x and y array using the cylindrical method.
         """
+        if pt_center is None:
+            pt_center = [0,0,0]
+        if pt_tip is None:
+            pt_tip = [0,0,1]
         tuple_list = [[(None,None,None),(None,None,None)]] * len(x_arr) * len(y_arr)
-        for x,xi in zip(x_arr,range(len(x_arr))):
-            for y,yi in zip(y_arr,range(len(y_arr))):
+        for x,x_i in zip(x_arr,range(len(x_arr))):
+            for y,y_i in zip(y_arr,range(len(y_arr))):
                 pt_start = pt_center + (y * (pt_tip - pt_center))
                 dir_vec_cyl = numpy.array([numpy.cos(x) * 1, numpy.sin(x), 0])
                 dir_vec = R @ dir_vec_cyl
                 pt_end = pt_start + ray_length_mm * dir_vec
-                tuple_list[yi*len(y_arr) + xi] = [tuple(pt_start),tuple(pt_end)]
+                tuple_list[y_i*len(y_arr) + x_i] = [tuple(pt_start),tuple(pt_end)]
         return tuple_list
 
     def compute_target_points(self,tuples_in):
@@ -496,7 +543,7 @@ class RayCreator():
 
     def __call__(self):
         """
-        Performs the full pipeline: Uses the MeshIntersector to create tuples, 
+        Performs the full pipeline: Uses the MeshIntersector to create tuples,
         compute target points and distances.
         ----
         Returns the distances.
@@ -508,7 +555,7 @@ class RayCreator():
 
 class AttributionTransformer():
     """
-    This class contains only static methods to transform attributions 
+    This class contains only static methods to transform attributions
     onto the 3D surface scans.
     """
     def __init__(self,method):
@@ -521,7 +568,7 @@ class AttributionTransformer():
         Returns color values of attribution.
         """
         polydata,lms = mesh()
-        points,cells = mesh.get_points_and_cells()
+        points,_ = mesh.get_points_and_cells()
         pt_center,R = MeshIntersector.define_axes_from_landmarks(lms)
         # If cylindrical mapping, we also need the tip
         if self.method == "cylinder":
@@ -529,13 +576,23 @@ class AttributionTransformer():
             pt_tip = intersector.define_tip()
         else:
             pt_tip = None
-        points_transformed = AttributionTransformer.mesh_points_to_distance_map(self.method,points,pt_center,R,pt_tip=pt_tip)
+        points_transformed = AttributionTransformer.mesh_points_to_distance_map(self.method,
+                                                                                points,
+                                                                                pt_center,
+                                                                                R,
+                                                                                pt_tip=pt_tip)
         # print("Mean:", numpy.mean(points_transformed,axis=0))
-        color_vals = AttributionTransformer.color_values_from_transformed_points(self.method,points_transformed,image)
+        color_vals = AttributionTransformer.color_values_from_transformed_points(self.method,
+                                                                                 points_transformed,
+                                                                                 image)
         return color_vals
 
     @staticmethod
     def color_values_from_transformed_points(method,points_transformed,image):
+        """
+        Use points tranformed from the 3D domain to the 2D domain and
+        interpolate color values in the 2D domain using an image.
+        """
         image = numpy.sum(image,2)
         # image_length = len(image)
         img_len_x = image.shape[0]-1
@@ -553,7 +610,10 @@ class AttributionTransformer():
         img_coords_cor_size = numpy.array(img_coords_rev) * [img_len_x,img_len_y]
         # We assume that we have attribution values on the whole head
         # If ray distribution however was different we need to re-scale it
-        color_values = [AttributionTransformer.linear_interpolation_on_image_grid(image,pt,offset_boundary=False) for pt in img_coords_cor_size]
+        color_values = [AttributionTransformer.linear_interpolation_on_image_grid(
+            image,
+            point,
+            offset_boundary=False) for point in img_coords_cor_size]
         return color_values
 
     @staticmethod
@@ -566,19 +626,19 @@ class AttributionTransformer():
     @staticmethod
     def euclidean_to_dm_spherical(pts):
         """
-        Expects already centered points. Transforms the 3D points 
+        Expects already centered points. Transforms the 3D points
         into phi and theta values using the spherical transformation
         for later interpolation.
         ----
         Returns list of coordinates.
         """
-        dists = [numpy.linalg.norm(pt,2) for pt in pts]
+        dists = [numpy.linalg.norm(point,2) for point in pts]
         new_frame_coords = dists
         for i in range(len(new_frame_coords)):
             r = dists[i]
-            pt = pts[i]
-            theta = numpy.arcsin(pt[2]/r)
-            phi = numpy.arctan2(pt[1],pt[0])
+            point = pts[i]
+            theta = numpy.arcsin(point[2]/r)
+            phi = numpy.arctan2(point[1],point[0])
             if phi < 0:
                 phi = phi + 2* numpy.pi
             eucl = [phi, theta, r]
@@ -588,21 +648,21 @@ class AttributionTransformer():
     @staticmethod
     def euclidean_to_dm_leftright_halfsphere(pts):
         """
-        Expects already centered points. Transforms the 3D points 
+        Expects already centered points. Transforms the 3D points
         into phi and theta values using the arch-spherical transformation
         for later interpolation.
         ----
         Returns list of coordinates.
         """
         # Assumes already centered points
-        dists = [numpy.linalg.norm(pt,2) for pt in pts]
+        dists = [numpy.linalg.norm(point,2) for point in pts]
         new_frame_coords = dists
         for i in range(len(new_frame_coords)):
             r = dists[i]
-            pt = pts[i]
+            point = pts[i]
             # Original
-            theta = numpy.arccos(pt[1]/r)
-            phi = numpy.arctan2(pt[2],pt[0])
+            theta = numpy.arccos(point[1]/r)
+            phi = numpy.arctan2(point[2],point[0])
             if phi < 0:
                 phi = phi + 2* numpy.pi
             eucl = [phi, theta, r]
@@ -619,13 +679,13 @@ class AttributionTransformer():
         Returns list of coordinates.
         """
         # Assumes already centered points
-        new_frame_coords = [[0,0,0] for pt in pts]
-        rhos = [numpy.linalg.norm(pt[:2]) for pt in pts]
+        new_frame_coords = [[0,0,0] for point in pts]
+        rhos = [numpy.linalg.norm(point[:2]) for point in pts]
         for i in range(len(pts)):
-            pt = pts[i]
+            point = pts[i]
             z = pts[i][2]
             rho = rhos[i]
-            phi = numpy.arctan2(pt[1],pt[0])
+            phi = numpy.arctan2(point[1],point[0])
             if phi < 0:
                 # print("correct")
                 phi = phi + 2* numpy.pi
@@ -634,7 +694,7 @@ class AttributionTransformer():
         return new_frame_coords
 
     @staticmethod
-    def mesh_points_to_distance_map(method,points,pt_center,R,pt_tip=None,tip_target_length=224):
+    def mesh_points_to_distance_map(method,points,pt_center,R,pt_tip=None):
         """
         This is a wrapper, to start off the transformation depending on the method
         ----
@@ -642,11 +702,11 @@ class AttributionTransformer():
         """
         if method == "halfsphere":
             pts_diff = points - pt_center
-            pts_rot = [numpy.transpose(R) @ pt for pt in pts_diff]
+            pts_rot = [numpy.transpose(R) @ point for point in pts_diff]
             pts_fin = AttributionTransformer.euclidean_to_dm_spherical(pts_rot)
         elif method == "leftright_halfsphere":
             pts_diff = points - pt_center
-            pts_rot = [numpy.transpose(R) @ pt for pt in pts_diff]
+            pts_rot = [numpy.transpose(R) @ point for point in pts_diff]
             pts_fin = AttributionTransformer.euclidean_to_dm_leftright_halfsphere(pts_rot)
         elif method == "cylinder":
             pts_diff = points - pt_center
@@ -656,41 +716,41 @@ class AttributionTransformer():
             length_tip = numpy.linalg.norm(pt_tip_scaled,2)
             # print(length_tip)
             # Make list of points
-            pts_rot = [numpy.transpose(R) @ pt for pt in pts_diff]
+            pts_rot = [numpy.transpose(R) @ point for point in pts_diff]
             # print(pts_rot)
-            pts_rot = [pt / [1,1,length_tip] for pt in pts_rot]
+            pts_rot = [point / [1,1,length_tip] for point in pts_rot]
             pts_fin = AttributionTransformer.euclidean_to_dm_cylinder(pts_rot)
         return pts_fin
 
     @staticmethod
-    def linear_interpolation_on_image_grid(img,pt,offset_boundary=False):
+    def linear_interpolation_on_image_grid(img,point,offset_boundary=False):
         """
-        Expects image and point on that image. Interpolate the color value 
-        of the image on the position of the point using bilinear interpolation. 
-        This implementation works on a regular grid, but is substantially faster than 
+        Expects image and point on that image. Interpolate the color value
+        of the image on the position of the point using bilinear interpolation.
+        This implementation works on a regular grid, but is substantially faster than
         the standard 2d interpolation libraries of matlab or scipy.
         ----
-        Returns interpolated color value of that point. If is not inside 
+        Returns interpolated color value of that point. If is not inside
         the image, returns zero.
         """
         # Idea: Add offset to extrapolate parts of image of boundary +-1
-        lower = numpy.array(numpy.floor(pt),dtype=int)
-        upper = numpy.array(numpy.ceil(pt),dtype=int)
-        if (offset_boundary == True) and ( (any(lower == -1)) or (any(upper == len(img)))):
-            pt_rel = pt - lower
+        lower = numpy.array(numpy.floor(point),dtype=int)
+        upper = numpy.array(numpy.ceil(point),dtype=int)
+        if (offset_boundary is True) and ( (any(lower == -1)) or (any(upper == len(img)))):
+            pt_rel = point - lower
             pt_rel_rec = 1 - pt_rel
             # Catch corner cases:
             if lower[0] == -1 and lower[1] == -1:
                 return img[upper[0],upper[1]]
-            elif lower[0] == -1 and upper[1] == len(img):
+            if lower[0] == -1 and upper[1] == len(img):
                 return img[upper[0],lower[1]]
-            elif upper[0] == len(img) and lower[1] == -1:
+            if upper[0] == len(img) and lower[1] == -1:
                 return img[lower[0],upper[1]]
-            elif upper[0] == len(img) and upper[1] == len(img):
+            if upper[0] == len(img) and upper[1] == len(img):
                 return img[lower[0],lower[1]]
             # Catch edge cases:
-            elif lower[0] == -1:
-                c = img[upper[0],lower[1]] * pt_rel[0] * pt_rel_rec[1] 
+            if lower[0] == -1:
+                c = img[upper[0],lower[1]] * pt_rel[0] * pt_rel_rec[1]
                 d = img[upper[0],upper[1]] * pt_rel[0] * pt_rel[1]
                 pt_int = c + d
             elif lower[1] == -1:
@@ -703,37 +763,19 @@ class AttributionTransformer():
                 pt_int = a + b
             elif upper[1] == len(img):
                 a = img[lower[0],lower[1]] * pt_rel_rec[0] * pt_rel_rec[1]
-                c = img[upper[0],lower[1]] * pt_rel[0] * pt_rel_rec[1] 
+                c = img[upper[0],lower[1]] * pt_rel[0] * pt_rel_rec[1]
                 pt_int = a + c
             return pt_int
         # Else: start normal routine
-        elif any(lower < 0) or any(upper > len(img) - 1):
-            return 0
+        if any(lower < 0) or any(upper > len(img) - 1):
+            pt_int = 0
         else:
             img = numpy.array(img)
-            pt_rel = pt - lower
+            pt_rel = point - lower
             pt_rel_rec = 1 - pt_rel
             a = img[lower[0],lower[1]] * pt_rel_rec[0] * pt_rel_rec[1]
             b = img[lower[0],upper[1]] * pt_rel_rec[0] * pt_rel[1]
-            c = img[upper[0],lower[1]] * pt_rel[0] * pt_rel_rec[1] 
+            c = img[upper[0],lower[1]] * pt_rel[0] * pt_rel_rec[1]
             d = img[upper[0],upper[1]] * pt_rel[0] * pt_rel[1]
             pt_int = a + b + c + d
         return pt_int
-
-    # This method seems to be not used anymore
-    # @staticmethod
-    # def transform_coordinates_to_dm_spherical_image_frame(points,pt_center,R):
-    #     """
-    #     This is mainly a wrapper including inverse_normalization to swap colors.
-    #     ----
-    #     Returns coordinate in image space.
-    #     """
-    #     sph_coords = AttributionTransformer.mesh_points_to_dm_spherical(points,pt_center,R)
-    #     sph_coords2d = numpy.array(sph_coords)[:,0:2]
-    #     normalized_coords = [ [c[0], c[1]] for c in sph_coords2d]
-    #     sanitized_coords = normalized_coords
-    #     for i,c in zip(range(len(normalized_coords)),normalized_coords):
-    #         c_new = c
-    #         sanitized_coords[i] = c_new
-    #     return sanitized_coords
-
